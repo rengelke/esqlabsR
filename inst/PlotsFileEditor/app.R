@@ -96,128 +96,95 @@ ui <- fluidPage(
 
 #---------- Backend logic ----------#
 server <- function(input, output, session) {
-  dfDataCombined <- reactiveVal(value = NULL)
-  dfPlots <- reactiveVal(value = NULL)
-  dfPlotGrids <- reactiveVal(value = NULL)
-  projectConfigFile <- reactiveVal(value = NULL)
-  plotFile <- NULL
 
-  output$currentProjConfig <- renderText({
-    if (is.null(projectConfigFile())) {
-      " No project configuration selected"
-    } else {
-      paste(" Current project configuration file:", projectConfigFile())
-    }
+  r <- reactiveValues()
+
+
+  ######## FILE IMPORT ###########
+
+  # Choose a file on computer
+  observeEvent(input$changeProjConfig, {
+    tryCatch(
+      {
+        r$newConfigFile <- file.choose()
+        r$displayFileMessage <- paste(" Current project configuration file:", r$newConfigFile)
+      },
+      error = function(cond) {
+        r$displayFileMessage <- "No project configuration selected"
+        return(NULL)
+      }
+    )
   })
 
-  changeProjectConfiguration <- function() {
-    newConfigFile <-
+  # Load excel files based on selected project configuration
+  observeEvent(r$newConfigFile, {
+    loadProjectConfiguration(r)
+  })
+
+
+  #' loadProjectConfiguration
+  #' @description Read project configuration files and import plot, scenario and data files.
+  #'
+  #' @param r reactiveValues object
+  loadProjectConfiguration <- function(r) {
+    # browser()
+    r$newProjectConfiguration <- createDefaultProjectConfiguration(r$newConfigFile)
+
+    codeFolder <- dirname(r$newConfigFile)
+
+    r$plotFile <- file.path(codeFolder, r$newProjectConfiguration$paramsFolder, r$newProjectConfiguration$plotsFile)
+    r$scenarioFile <- file.path(codeFolder, r$newProjectConfiguration$paramsFolder, r$newProjectConfiguration$scenarioDefinitionFile)
+
+    # Load plotFile
+    if (file.exists(r$plotFile)) {
+      r$dfDataCombined <- readExcel(r$plotFile, sheet = "DataCombined")
+      r$dfPlots <- readExcel(r$plotFile, sheet = "plotConfiguration")
+      r$dfPlotGrids <- readExcel(r$plotFile, sheet = "plotGrids")
+    } else {
+      r$dfDataCombined <- NULL
+      r$dfPlots <- NULL
+      r$dfPlotGrids <- NULL
+    }
+
+    # Load ScenarioFile
+    if (file.exists(r$scenarioFile)) {
+      r$dfScenarios <- readExcel(r$scenarioFile, sheet = "Scenarios")
+      r$dfOutputPaths <- readExcel(r$scenarioFile, sheet = "OutputPaths")
+    }
+
+    # Load dataFile
+
+    dataFolder <- file.path(codeFolder, r$newProjectConfiguration$dataFolder)
+    dataFile <- file.path(dataFolder, r$newProjectConfiguration$dataFile)
+    dataImporterConfigurationFile <- file.path(dataFolder, r$newProjectConfiguration$dataImporterConfigurationFile)
+    if (file.exists(dataFile) & file.exists(dataImporterConfigurationFile)) {
       tryCatch(
         {
-          file.choose()
+          r$datasets <- ospsuite::loadDataSetsFromExcel(
+            xlsFilePath = dataFile,
+            importerConfigurationOrPath = dataImporterConfigurationFile,
+            # currently all sheets will be loaded
+            importAllSheets = TRUE
+          )
         },
         error = function(cond) {
-          return(NULL)
+          return()
         }
       )
-    newProjectConfiguration <- NULL
-    if (!is.null(newConfigFile)) {
-      newProjectConfiguration <-
-        tryCatch(
-          {
-            createDefaultProjectConfiguration(newConfigFile)
-          },
-          error = function(cond) {
-            return(NULL)
-          }
-        )
-    }
-    if (!is.null(newProjectConfiguration)) {
-      projectConfigFile(newConfigFile)
-      codeFolder <- dirname(newConfigFile)
-      plotFile <<- file.path(codeFolder, newProjectConfiguration$paramsFolder, newProjectConfiguration$plotsFile)
-
-      if (file.exists(plotFile)) {
-        dfDataCombined(readExcel(plotFile, sheet = "DataCombined"))
-        dfPlots(readExcel(plotFile, sheet = "plotConfiguration"))
-        dfPlotGrids(readExcel(plotFile, sheet = "plotGrids"))
-        updateSelectizeInput(session, "PlotDataCombined", choices = dfDataCombined()$DataCombinedName)
-        updateSelectizeInput(session, "plotIDs", choices = dfPlots()$plotID)
-      } else {
-        dfDataCombined(NULL)
-        dfPlots(NULL)
-        dfPlotGrids(NULL)
-        updateSelectizeInput(session, "PlotDataCombined", choices = "")
-        updateSelectizeInput(session, "plotIDs", choices = "")
-      }
-
-      scenarioFile <- file.path(codeFolder, newProjectConfiguration$paramsFolder, newProjectConfiguration$scenarioDefinitionFile)
-      if (file.exists(scenarioFile)) {
-        dfScenarios <- readExcel(scenarioFile, sheet = "Scenarios")
-        dfOutputPaths <- readExcel(scenarioFile, sheet = "OutputPaths")
-        updateSelectizeInput(session, "scenario", choices = dfScenarios$Scenario_name, options = list(create = TRUE))
-        updateSelectizeInput(session, "path", choices = dfOutputPaths$OutputPath, options = list(create = TRUE))
-      }
-
-      # try to load observed data from 'Data' folder as defined in project configuration
-      dataFolder <- file.path(codeFolder, newProjectConfiguration$dataFolder)
-      dataFile <- file.path(dataFolder, newProjectConfiguration$dataFile)
-      dataImporterConfigurationFile <- file.path(dataFolder, newProjectConfiguration$dataImporterConfigurationFile)
-      if (file.exists(dataFile) & file.exists(dataImporterConfigurationFile)) {
-        tryCatch(
-          {
-            dataSets <- ospsuite::loadDataSetsFromExcel(
-              xlsFilePath = dataFile,
-              importerConfigurationOrPath = dataImporterConfigurationFile,
-              # currently all sheets will be loaded
-              importAllSheets = TRUE
-            )
-            updateSelectizeInput(session, "dataSet", choices = names(dataSets) %||% "", options = list(create = TRUE))
-          },
-          error = function(cond) {
-            return()
-          }
-        )
-      }
     }
   }
 
-  observeEvent(input$changeProjConfig, {
-    changeProjectConfiguration()
-  })
 
-  observeEvent(input$dataType, {
-    output$infoAddData <- NULL
-    if (input$dataType == "simulated") {
-      shinyjs::enable("scenario")
-      shinyjs::enable("path")
-      updateTextInput(session, "dataSet", value = "")
-      shinyjs::disable("dataSet")
-    } else {
-      shinyjs::disable("scenario")
-      shinyjs::disable("path")
-      shinyjs::enable("dataSet")
-    }
-  })
-
-  output$dataCombinedSheet <- renderTable(dfDataCombined())
-
-  output$plotConfigurationSheet <- renderTable(dfPlots())
-
-  output$plotGridSheet <- renderTable(dfPlotGrids())
+  ######## Add new rows in tables ###########
 
   observeEvent(input$addData, {
-    # obligatory inputs 'DataCombinedName' and 'label'
-    if (gsub(" ", "", input$DataCombinedName) == "" || gsub(" ", "", input$label) == "") {
-      output$infoAddData <- renderText("Please fill in fields 'DataCombinedName' and 'label'")
-      return()
-    }
-    output$infoAddData <- NULL
+    req(input$DataCombinedName)
+    req(input$label)
+
     if (input$dataType == "simulated") {
-      if (gsub(" ", "", input$scenario) == "" || gsub(" ", "", input$path) == "") {
-        output$infoAddData <- renderText("Please fill in fields 'scenario' and 'path'")
-        return()
-      }
+      req(input$scenario)
+      req(input$path)
+
       newRow <- data.frame(
         DataCombinedName = input$DataCombinedName,
         dataType = input$dataType,
@@ -226,10 +193,7 @@ server <- function(input, output, session) {
         path = input$path, group = input$group
       )
     } else {
-      if (gsub(" ", "", input$dataSet) == "") {
-        output$infoAddData <- renderText("Please fill in field 'dataSet'")
-        return()
-      }
+      req(input$dataSet)
       newRow <- data.frame(
         DataCombinedName = input$DataCombinedName,
         dataType = input$dataType,
@@ -238,16 +202,18 @@ server <- function(input, output, session) {
         group = input$group
       )
     }
-    dfDataCombined(bind_rows(dfDataCombined(), newRow))
-    updateSelectizeInput(session, "PlotDataCombined", choices = dfDataCombined()$DataCombinedName)
+
+    r$dfDataCombined <- bind_rows(r$dfDataCombined, newRow)
   })
+
+  # TODO: apply same strategy below
 
   observeEvent(input$addPlot, {
     if (gsub(" ", "", input$plotID) == "") {
       output$infoAddPlot <- renderText("Please fill in field 'plotID'")
       return()
     }
-    if (gsub(" ", "", input$plotID) %in% dfPlots()$plotID) {
+    if (gsub(" ", "", input$plotID) %in% r$dfPlots$plotID) {
       output$infoAddPlot <- renderText("Plot ID already exists, please choose another ID")
       return()
     }
@@ -266,8 +232,7 @@ server <- function(input, output, session) {
       quantiles = input$quantiles,
       foldDistance = input$foldDistance
     )
-    dfPlots(bind_rows(dfPlots(), newRow))
-    updateSelectizeInput(session, "plotIDs", choices = dfPlots()$plotID)
+    r$dfPlots <- bind_rows(r$dfPlots, newRow)
   })
 
   observeEvent(input$addPlotGrid, {
@@ -275,7 +240,7 @@ server <- function(input, output, session) {
       output$infoAddPlotGrid <- renderText("Please fill in fields 'name' and 'plotIDs'")
       return()
     }
-    if (gsub(" ", "", input$plotGridName) %in% dfPlotGrids()$name) {
+    if (gsub(" ", "", input$plotGridName) %in% r$dfPlotGrids$name) {
       output$infoAddPlotGrid <- renderText("Plot grid already exists, please choose another name")
       return()
     }
@@ -285,25 +250,131 @@ server <- function(input, output, session) {
       plotIDs = paste(input$plotIDs, collapse = ", "),
       title = input$plotGridTitle
     )
-    dfPlotGrids(bind_rows(dfPlotGrids(), newRow))
+    r$dfPlotGrids <- bind_rows(r$dfPlotGrids, newRow)
   })
+
+
+  ####### SAVE OUTPUT ########
 
   # save changes to projectConfiguration$plotsFile
   observeEvent(input$save, {
     writeExcel(list(
-      "DataCombined" = dfDataCombined(),
-      "plotConfiguration" = dfPlots(),
-      "plotGrids" = dfPlotGrids()
-    ), path = plotFile)
+      "DataCombined" = r$dfDataCombined,
+      "plotConfiguration" = r$dfPlots,
+      "plotGrids" = r$dfPlotGrids
+    ), path = r$plotFile)
   })
 
   # save data frames of plotsFile in new file
   observeEvent(input$saveNew, {
     try(writeExcel(list(
-      "DataCombined" = dfDataCombined() %||% data.frame(),
-      "plotConfiguration" = dfPlots() %||% data.frame(),
-      "plotGrids" = dfPlotGrids() %||% data.frame()
+      "DataCombined" = r$dfDataCombined %||% data.frame(),
+      "plotConfiguration" = r$dfPlots %||% data.frame(),
+      "plotGrids" = r$dfPlotGrids %||% data.frame()
     ), path = file.choose(new = TRUE)))
+  })
+
+  ####### GENERAL OBSERVERS ##########
+
+  # Update Inputs based on data contents
+  observeEvent(r$dfDataCombined, {
+    choices <- if (is.null(r$dfDataCombined)) {
+      ""
+    } else {
+      r$dfDataCombined$DataCombinedName
+    }
+    updateSelectizeInput(session, "PlotDataCombined", choices = choices)
+  })
+
+  observeEvent(r$dfPlots, {
+    choices <- if (is.null(r$dfPlots)) {
+      ""
+    } else {
+      r$dfPlots$plotID
+    }
+    updateSelectizeInput(session, "plotIDs", choices = choices)
+  })
+
+
+  observeEvent(r$dfScenarios, {
+    choices <- if (is.null(r$dfScenarios)) {
+      ""
+    } else {
+      r$dfScenarios$Scenario_name
+    }
+    updateSelectizeInput(session, "scenario", choices = choices, options = list(create = TRUE))
+  })
+
+  observeEvent(r$dfOutputPaths, {
+    choices <- if (is.null(r$dfOutputPaths)) {
+      ""
+    } else {
+      r$dfOutputPaths$OutputPath
+    }
+    updateSelectizeInput(session, "path", choices = choices, options = list(create = TRUE))
+  })
+
+
+  observeEvent(r$dataSets, {
+    choices <- if (is.null(r$dataSets)) {
+      ""
+    } else {
+      names(r$dataSets)
+    }
+    updateSelectizeInput(session, "dataSet", choices = choices, options = list(create = TRUE))
+  })
+
+
+  # Able/Disable some fields depending on dataType input
+  # TODO: explain why here
+  observeEvent(input$dataType, {
+    output$infoAddData <- NULL
+    if (input$dataType == "simulated") {
+      shinyjs::enable("scenario")
+      shinyjs::enable("path")
+      updateTextInput(session, "dataSet", value = "")
+      shinyjs::disable("dataSet")
+    } else {
+      shinyjs::disable("scenario")
+      shinyjs::disable("path")
+      shinyjs::enable("dataSet")
+    }
+  })
+
+
+  # Display notification if one input is missing for adding data
+  observeEvent(input$addData, {
+    necessary_inputs <- c("DataCombinedName", "label")
+
+    if (input$dataType == "simulated") {
+      necessary_inputs <- c(necessary_inputs, "scenario", "path")
+    } else {
+      necessary_inputs <- c(necessary_inputs, "dataSet")
+    }
+
+    for (ni in necessary_inputs) {
+      if (is.na(input[[ni]]) || input[[ni]] == "" || input[[ni]] == " ") {
+        showNotification(ui = paste(ni, "is missing."))
+      }
+    }
+  })
+
+
+  # OUTPUTS
+
+  # display dataCombined table
+  output$dataCombinedSheet <- renderTable(r$dfDataCombined)
+
+  # display plots table
+  output$plotConfigurationSheet <- renderTable(r$dfPlots)
+
+  # display plotgrids table
+  output$plotGridSheet <- renderTable(r$dfPlotGrids)
+
+  # Display a message describing imported file status
+  output$currentProjConfig <- renderText({
+    req(r$displayFileMessage)
+    r$displayFileMessage
   })
 }
 
