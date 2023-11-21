@@ -1,4 +1,4 @@
-createPITaskFromExcel <- function(scenarios, observedData, projectConfiguration) {
+createPITaskFromExcel <- function(projectConfiguration) {
   validateIsOfType(scenarios, "Scenario")
   validateIsOfType(observedData, "DataSet")
   validateIsOfType(projectConfiguration, "ProjectConfiguration")

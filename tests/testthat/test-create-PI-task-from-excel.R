@@ -1,5 +1,5 @@
 test_that("PI tasks are created from an Excel file correctly", {
-  projectConfiguration <- esqlabsR::createDefaultProjectConfiguration("ProjectConfiguration.xlsx")
+  projectConfiguration <- createDefaultProjectConfiguration(test_ProjectConfiguration())
   expect_no_error(task <- createPITaskFromExcel(projectConfiguration = projectConfiguration))
 })
 test_that("PI tasks created from an Excel file can be run correctly", {
